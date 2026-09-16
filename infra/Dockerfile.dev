@@ -1,0 +1,32 @@
+# Image dev — utilisée par docker-compose pour le hot reload.
+# En prod on n'utilise PAS Docker (Vercel build l'app).
+#
+# Construit depuis la RACINE du monorepo (context: ../ dans docker-compose).
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# libc6-compat requis par certains binaires node, openssl pour Prisma
+RUN apk add --no-cache libc6-compat openssl
+
+# Corepack active pnpm à la version déclarée dans package.json (pnpm@9.0.0)
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+# On copie UNIQUEMENT les manifests pour profiter du cache Docker
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json ./apps/web/
+COPY apps/api/package.json ./apps/api/
+COPY packages/db/package.json ./packages/db/
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/eslint-config/package.json ./packages/eslint-config/
+COPY packages/tsconfig/package.json ./packages/tsconfig/
+
+# Install frozen (CI-grade)
+RUN pnpm install --frozen-lockfile
+
+# Le code source est monté en volume (hot reload)
+EXPOSE 3000
+
+CMD ["pnpm", "dev"]

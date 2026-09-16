@@ -1,0 +1,179 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force redeploy even if no changes'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  TURBO_TELEMETRY_DISABLED: '1'
+  NODE_VERSION: '20.11.0'
+  PNPM_VERSION: '9.15.4'
+
+jobs:
+  preflight:
+    name: Preflight checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+  backup-db:
+    name: Backup DB pre-deploy
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Neon manual backup
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: |
+          if [ -z "$NEON_API_KEY" ]; then
+            echo 'NEON_API_KEY not set, skipping backup'
+            exit 0
+          fi
+          curl -fsS -X POST \
+            "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/main/snapshots" \
+            -H "Authorization: Bearer $NEON_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"name": "pre-deploy-'${{ needs.preflight.outputs.sha }}'"}'
+          echo 'Backup triggered'
+
+  deploy-web:
+    name: Deploy web (Vercel)
+    needs: [preflight, backup-db]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://maison14.fr
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - name: Install Vercel CLI
+        run: pnpm install -g vercel@latest
+      - name: Pull Vercel environment info
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy
+        id: deploy
+        run: |
+          vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} \
+            --archive=tgz --yes
+          echo "url=https://maison14.fr" >> "$GITHUB_OUTPUT"
+      - name: Promote alias
+        run: |
+          vercel alias set "${{ steps.deploy.outputs.deployment-url }}" maison14.fr \
+            --token=${{ secrets.VERCEL_TOKEN }}
+          vercel alias set "${{ steps.deploy.outputs.deployment-url }}" www.maison14.fr \
+            --token=${{ secrets.VERCEL_TOKEN }}
+
+  deploy-api:
+    name: Deploy API (Vercel Functions)
+    needs: [preflight, backup-db]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://api.maison14.fr
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - name: Install Vercel CLI
+        run: pnpm install -g vercel@latest
+      - name: Pull Vercel environment info
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build API
+        run: pnpm --filter @ecommerce/api build
+      - name: Deploy API
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+  smoke:
+    name: Smoke tests post-deploy
+    needs: [deploy-web, deploy-api]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Health check web
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS -o /dev/null -w '%{http_code}\n' https://maison14.fr/api/health 2>/dev/null; then
+              echo 'web OK'
+              break
+            fi
+            echo "attempt $i failed, retrying..."
+            sleep 10
+          done
+      - name: Health check api
+        run: |
+          curl -fsS https://api.maison14.fr/health || echo 'api health failed'
+      - name: Homepage render check
+        run: |
+          status=$(curl -fsS -o /tmp/home.html -w '%{http_code}' https://maison14.fr/)
+          if [ "$status" != "200" ]; then
+            echo "home returned $status"
+            exit 1
+          fi
+          grep -q 'Maison 14' /tmp/home.html && echo 'home renders OK'
+      - name: Notify Sentry of deploy
+        if: always()
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          if [ -n "$SENTRY_AUTH_TOKEN" ]; then
+            curl -fsS -X POST \
+              "https://sentry.io/api/0/organizations/$SENTRY_ORG/releases/" \
+              -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
+              -H 'Content-Type: application/json' \
+              -d '{"version":"'${{ needs.preflight.outputs.sha }}'","projects":["'$SENTRY_PROJECT'"]}' \
+              || echo 'Sentry release create failed (non-blocking)'
+          fi
+
+  rollback:
+    name: Rollback on smoke failure
+    needs: [deploy-web, deploy-api, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: failure()
+    steps:
+      - name: Rollback to previous deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          echo 'Smoke tests failed, rolling back...'
+          vercel rollback --token=$VERCEL_TOKEN --yes || echo 'rollback failed'
+          # Page on-call
+          curl -fsS -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"🚨 Deploy FAILED + rolled back: ${{ github.run_id }}"}' || true

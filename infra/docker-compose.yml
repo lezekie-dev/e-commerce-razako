@@ -1,0 +1,107 @@
+name: ecommerce-dev
+
+# Stack local de développement — alignée sur la prod (Vercel + Neon + Upstash).
+# Le projet est un monorepo pnpm ; on installe via Corepack depuis la racine.
+#
+# Usage :
+#   docker compose up -d
+#   docker compose exec app pnpm dev     # ou un terminal à part hors container
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: eco-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ecom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecom_dev_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce}
+      # TZ pour rendre les seeds/tests déterministes (cf. @QA)
+      TZ: ${TZ:-Europe/Paris}
+      PGTZ: ${TZ:-Europe/Paris}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/initdb.d:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ecom} -d ${POSTGRES_DB:-ecommerce}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: eco-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailhog:
+    # Capture les emails en dev (pas d'envoi réel)
+    image: mailhog/mailhog:latest
+    container_name: eco-mailhog
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # UI web
+
+  adminer:
+    image: adminer:latest
+    container_name: eco-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha-dark
+
+  app:
+    # Build depuis la racine du monorepo (besoin du pnpm-workspace.yaml + lockfile)
+    build:
+      context: ../        # racine du monorepo
+      dockerfile: infra/Dockerfile.dev
+    container_name: eco-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      # pnpm aligné avec le repo (Corepack lit packageManager du package.json)
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      TZ: ${TZ:-Europe/Paris}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecom}:${POSTGRES_PASSWORD:-ecom_dev_pw}@postgres:5432/${POSTGRES_DB:-ecommerce}
+      REDIS_URL: redis://redis:6379
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      # Paiement en mode test (cf. INFRA_PLAN)
+      PAYMENTS_MODE: test
+    ports:
+      - "3000:3000"
+    volumes:
+      # Hot reload : on monte la racine du monorepo, pas infra/
+      - ../:/app
+      # node_modules vient de l'image (pas du volume) pour éviter le mismatch OS
+      - /app/node_modules
+      - /app/apps/web/.next
+      - /app/apps/api/dist
+    # Pour turbo : on lance la tâche dev du workspace web/api via filtre
+    command: ["pnpm", "dev"]
+
+volumes:
+  postgres_data:
+  redis_data:

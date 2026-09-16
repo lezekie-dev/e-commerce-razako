@@ -1,0 +1,123 @@
+name: DB backup
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # Tous les jours à 03:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+env:
+  TIMESTAMP: ${{ github.run_id }}-${{ github.event.schedule || github.run_attempt }}
+
+jobs:
+  backup-neon:
+    name: Snapshot Neon DB
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Create snapshot
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: |
+          if [ -z "$NEON_API_KEY" ]; then
+            echo 'NEON_API_KEY not set'
+            exit 1
+          fi
+          curl -fsS -X POST \
+            "https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/main/snapshots" \
+            -H "Authorization: Bearer $NEON_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"auto-'$TIMESTAMP'"}' | jq .
+
+  dump-to-r2:
+    name: Dump to R2
+    needs: backup-neon
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rclone + postgres client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client rclone
+      - name: Configure rclone for Cloudflare R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = $R2_ACCESS_KEY_ID
+          secret_access_key = $R2_SECRET_ACCESS_KEY
+          endpoint = $R2_ENDPOINT
+          no_check_bucket = true
+          EOF
+      - name: pg_dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          FILENAME="backup-$TIMESTAMP.sql.gz"
+          pg_dump "$DATABASE_URL" --no-owner --clean --if-exists | gzip > "/tmp/$FILENAME"
+          echo "dump size: $(stat -c %s /tmp/$FILENAME) bytes"
+      - name: Upload to R2
+        run: |
+          rclone copy "/tmp/backup-$TIMESTAMP.sql.gz" "r2:maison14-backups/db/" \
+            --progress --transfers 4 --checkers 8
+      - name: Cleanup local
+        run: rm -f "/tmp/backup-$TIMESTAMP.sql.gz"
+
+  cleanup-old:
+    name: Cleanup backups > 90 days
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Configure rclone
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = $R2_ACCESS_KEY_ID
+          secret_access_key = $R2_SECRET_ACCESS_KEY
+          endpoint = $R2_ENDPOINT
+          no_check_bucket = true
+          EOF
+      - name: Delete old backups
+        run: |
+          rclone delete "r2:maison14-backups/db/" \
+            --min-age 90d --verbose
+
+  notify:
+    name: Notify backup success
+    needs: [dump-to-r2, cleanup-old]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK" ]; then
+            exit 0
+          fi
+          if [ "${{ job.status }}" == "success" ]; then
+            MSG="✅ Backup DB OK — $TIMESTAMP"
+          else
+            MSG="❌ Backup DB FAILED — $TIMESTAMP"
+          fi
+          curl -fsS -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d "{\"text\":\"$MSG\"}"

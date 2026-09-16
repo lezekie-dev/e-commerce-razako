@@ -1,0 +1,88 @@
+name: Lighthouse CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: lighthouse-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20.11.0'
+  PNPM_VERSION: '9.15.4'
+
+jobs:
+  lighthouse:
+    name: Lighthouse audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Wait for preview deploy
+        if: github.event_name == 'pull_request'
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null "https://pr-${{ github.event.pull_request.number }}.maison14-preview.fr/api/health"; then
+              echo 'preview ready'
+              exit 0
+            fi
+            echo "waiting for preview... attempt $i"
+            sleep 20
+          done
+          echo 'preview never came up'
+          exit 1
+      - name: Run Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v11
+        with:
+          configPath: '.lighthouserc.json'
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+
+  budgets:
+    name: Check performance budgets
+    needs: lighthouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Lighthouse report
+        uses: actions/download-artifact@v4
+        with:
+          name: lighthouse-report
+      - name: Parse and assert
+        run: |
+          node scripts/check-lighthouse.mjs
+
+  comment:
+    name: Comment PR with scores
+    if: github.event_name == 'pull_request' && always()
+    needs: [lighthouse, budgets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: lighthouse
+          message: |
+            ## Lighthouse scores
+
+            | Category | Score | Budget |
+            |---|---|---|
+            | Performance | ${{ needs.lighthouse.outputs.performance }}% | ≥ 90 |
+            | Accessibility | ${{ needs.lighthouse.outputs.accessibility }}% | ≥ 95 |
+            | Best Practices | ${{ needs.lighthouse.outputs.best-practices }}% | ≥ 95 |
+            | SEO | ${{ needs.lighthouse.outputs.seo }}% | ≥ 95 |

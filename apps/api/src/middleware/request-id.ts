@@ -1,0 +1,11 @@
+import type { MiddlewareHandler } from 'hono'
+import { nanoid } from 'nanoid'
+
+export function requestId(): MiddlewareHandler {
+  return async (c, next) => {
+    const id = c.req.header('x-request-id') ?? nanoid(16)
+    c.set('requestId', id)
+    c.header('x-request-id', id)
+    await next()
+  }
+}

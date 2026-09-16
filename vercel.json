@@ -1,0 +1,112 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm turbo run build",
+  "devCommand": "pnpm turbo run dev",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "outputDirectory": "apps/web/.next",
+  "framework": "nextjs",
+  "regions": ["cdg1"],
+  "trailingSlash": false,
+  "cleanUrls": true,
+  "crons": [
+    {
+      "path": "/api/cron/purge-expired-carts",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/reindex-search",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/abandoned-cart-email",
+      "schedule": "0 */6 * * *"
+    }
+  ],
+  "functions": {
+    "apps/api/src/**/*.ts": {
+      "memory": 1024,
+      "maxDuration": 30,
+      "regions": ["cdg1"]
+    }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        {
+          "key": "X-DNS-Prefetch-Control",
+          "value": "on"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)\\.(css|js|woff2?|ttf|otf|eot|svg|png|jpe?g|webp|avif|ico)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/api/stripe/webhook",
+      "destination": "/api/webhooks/stripe",
+      "statusCode": 308
+    },
+    {
+      "source": "/home",
+      "destination": "/",
+      "statusCode": 301
+    },
+    {
+      "source": "/blog",
+      "destination": "/magazine",
+      "statusCode": 301
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/sitemap"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/api/robots"
+    }
+  ]
+}
