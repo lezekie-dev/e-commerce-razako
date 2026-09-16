@@ -1,23 +1,26 @@
 'use client';
 
+/**
+ * Overlays du SiteHeader — `apps/web/components/site-header-overlays.tsx`
+ *
+ * M2 :
+ * - <HeaderSearch/>  → overlay recherche (input autofocus, Esc pour fermer)
+ * - <MobileMenu/>    → menu plein écran < md (hamburger)
+ * - <CartDrawer/>    → RE-EXPORT depuis `./cart-drawer` (réel, alimenté par le store)
+ *
+ * La séparation reste pour permettre le code-splitting des overlays lourds.
+ */
+
 import * as React from 'react';
 import Link from 'next/link';
 import { buttonVariants } from '@ecommerce/ui';
 
-/**
- * Overlays du SiteHeader — `apps/web/components/site-header-overlays.tsx`
- * 3 sous-composants Client, séparés du shell `site-header.tsx` pour
- * réduire le couplage et permettre le code-splitting par overlay.
- *
- * - <HeaderSearch/>  → overlay recherche (input autofocus, Esc pour fermer)
- * - <CartDrawer/>    → drawer latéral droit (ouvre via le bouton Panier)
- * - <MobileMenu/>    → menu plein écran < md (hamburger)
- */
+export { CartDrawer } from './cart-drawer';
 
 export type NavLink = { href: string; label: string };
 
 /* ─────────────────────────────────────────────────────────────────────────
- * HeaderSearch
+ * HeaderSearch — overlay recherche
  * ───────────────────────────────────────────────────────────────────────── */
 
 export function HeaderSearch({
@@ -28,13 +31,10 @@ export function HeaderSearch({
   onClose: () => void;
 }): React.ReactElement | null {
   const inputRef = React.useRef<HTMLInputElement>(null);
-
   React.useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
-
   if (!open) return null;
-
   return (
     <div
       id="site-search"
@@ -48,12 +48,7 @@ export function HeaderSearch({
         className="w-full max-w-2xl rounded-2xl border border-ink-200 bg-white p-4 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <form
-          role="search"
-          action="/recherche"
-          method="get"
-          className="flex items-center gap-2"
-        >
+        <form role="search" action="/recherche" method="get" className="flex items-center gap-2">
           <SearchIcon className="h-5 w-5 shrink-0 text-ink-500" aria-hidden="true" />
           <input
             ref={inputRef}
@@ -80,71 +75,7 @@ export function HeaderSearch({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
- * CartDrawer — placeholder branchera le store M3
- * ───────────────────────────────────────────────────────────────────────── */
-
-export function CartDrawer({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}): React.ReactElement | null {
-  if (!open) return null;
-
-  return (
-    <div
-      id="site-cart"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Panier"
-      className="fixed inset-0 z-[60] flex justify-end bg-ink-900/40 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <aside
-        className="flex h-full w-full max-w-md flex-col border-l border-ink-200 bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-center justify-between border-b border-ink-200 px-5 py-4">
-          <h2 className="font-display text-lg font-medium text-ink-900">
-            Votre panier
-          </h2>
-          <button
-            type="button"
-            aria-label="Fermer le panier"
-            onClick={onClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-700 hover:bg-ink-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
-          >
-            <CloseIcon className="h-5 w-5" aria-hidden="true" />
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-y-auto px-5 py-6">
-          <div className="rounded-xl border border-dashed border-ink-300 bg-ink-50 p-6 text-center text-sm text-ink-600">
-            Votre panier est vide.
-            <br />
-            <span className="mt-1 inline-block text-xs text-ink-500">
-              Branchez le store M3 pour afficher les articles.
-            </span>
-          </div>
-        </div>
-
-        <footer className="border-t border-ink-200 p-5">
-          <Link
-            href="/panier"
-            onClick={onClose}
-            className={buttonVariants({ variant: 'primary', size: 'lg', fullWidth: true })}
-          >
-            Voir le panier
-          </Link>
-        </footer>
-      </aside>
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
- * MobileMenu
+ * MobileMenu — menu plein écran < md
  * ───────────────────────────────────────────────────────────────────────── */
 
 export function MobileMenu({
@@ -157,7 +88,6 @@ export function MobileMenu({
   nav: ReadonlyArray<NavLink>;
 }): React.ReactElement | null {
   if (!open) return null;
-
   return (
     <div
       id="site-mobile-menu"
@@ -167,11 +97,7 @@ export function MobileMenu({
       className="fixed inset-0 z-[60] flex flex-col bg-white md:hidden"
     >
       <div className="flex h-[72px] items-center justify-between border-b border-ink-200 px-4">
-        <Link
-          href="/"
-          onClick={onClose}
-          className="font-display text-xl font-medium text-ink-900"
-        >
+        <Link href="/" onClick={onClose} className="font-display text-xl font-medium text-ink-900">
           Maison 14
         </Link>
         <button
@@ -183,7 +109,6 @@ export function MobileMenu({
           <CloseIcon className="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
-
       <nav aria-label="Navigation principale (mobile)" className="flex-1 overflow-y-auto px-4 py-6">
         <ul role="list" className="flex flex-col gap-1">
           {nav.map((item) => (
@@ -199,7 +124,6 @@ export function MobileMenu({
             </li>
           ))}
         </ul>
-
         <div className="mt-8 grid gap-3 border-t border-ink-200 pt-6">
           <Link
             href="/compte"
@@ -222,8 +146,7 @@ export function MobileMenu({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
- * Icônes inline (SVG, aucune dépendance externe ; lucide-react dispo si
- * Designer veut standardiser en M3).
+ * Icônes inline (lucide-like, viewBox 24)
  * ───────────────────────────────────────────────────────────────────────── */
 
 type IconProps = React.SVGProps<SVGSVGElement>;
@@ -237,15 +160,13 @@ export function SearchIcon(props: IconProps) {
   );
 }
 
-export function CartIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <circle cx="9" cy="21" r="1" />
-      <circle cx="20" cy="21" r="1" />
-      <path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6" />
-    </svg>
-  );
-}
+export const CartIcon = (props: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <circle cx="9" cy="21" r="1" />
+    <circle cx="20" cy="21" r="1" />
+    <path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6" />
+  </svg>
+);
 
 export function UserIcon(props: IconProps) {
   return (

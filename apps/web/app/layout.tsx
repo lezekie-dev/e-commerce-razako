@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { SiteHeader } from '../components/site-header';
+import { ToastHost } from '../components/toast-host';
+import { CartHydrator } from '../components/cart-hydrator';
 
 /**
  * Root layout — `apps/web/app/layout.tsx`
@@ -68,9 +70,9 @@ export default function RootLayout({
         </a>
 
         {/* AC-HOME-07 — header sticky 72 px (Server-rendered shell + Client interactivity) */}
-        <SiteHeader />
+        <ToastHost><CartHydrator /><SiteHeader />
 
-        {children}
+        {children}</ToastHost>
       </body>
     </html>
   );

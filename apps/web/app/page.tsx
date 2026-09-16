@@ -11,7 +11,11 @@ import {
   CardHeader,
   CardTitle,
   Price,
+  MotionFade,
+  MotionParallax,
 } from '@ecommerce/ui';
+import { FeaturedProductsGrid } from '../components/featured-products-grid';
+import { findFeaturedProducts } from '../lib/catalog';
 
 /**
  * Home page — `apps/web/app/page.tsx`
@@ -101,74 +105,6 @@ const FEATURED_COLLECTIONS: ReadonlyArray<Collection> = [
 // Prix en centimes, formatés via <Price/> en fr-FR EUR (AC-HOME-06)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Product = {
-  slug: string;
-  name: string;
-  image: string;
-  alt: string;
-  /** prix TTC en centimes */
-  amount: number;
-  /** prix barré optionnel (en centimes) — déclenche le rendu "promo" */
-  compareAt?: number;
-  badge?: 'new' | 'promo' | 'last';
-};
-
-const FEATURED_PRODUCTS: ReadonlyArray<Product> = [
-  {
-    slug: 'bouilloire-en-fonte-segura',
-    name: 'Bouilloire en fonte Segura',
-    image: '/images/products/bouilloire-segura.webp',
-    alt: 'Bouilloire en fonte noire à bec verseur, posée sur un plan de travail',
-    amount: 8900,
-    compareAt: 10900,
-    badge: 'promo',
-  },
-  {
-    slug: 'vase-terracotta-lorca',
-    name: 'Vase Terracotta Lorca',
-    image: '/images/products/vase-lorca.webp',
-    alt: 'Vase en céramique terracotta aux formes organiques',
-    amount: 4900,
-    badge: 'new',
-  },
-  {
-    slug: 'lampadaire-tala-led',
-    name: 'Lampadaire Tala LED',
-    image: '/images/products/lampe-tala.webp',
-    alt: 'Lampadaire en chêne clair avec abat-jour en lin écru',
-    amount: 19900,
-    badge: 'new',
-  },
-  {
-    slug: 'carafe-emaillé-vega',
-    name: 'Carafe émaillée Vega',
-    image: '/images/products/carafe-vega.webp',
-    alt: 'Carafe en grès émaillé vert sombre munie d’un bouchon en liège',
-    amount: 3400,
-    compareAt: 3900,
-    badge: 'promo',
-  },
-  {
-    slug: 'plaid-laine-brumaire',
-    name: 'Plaid laine Brumaire',
-    image: '/images/products/plaid-brumaire.webp',
-    alt: 'Plaid en laine teinte en dégradé d’ocre roulé sur une chaise',
-    amount: 11900,
-  },
-  {
-    slug: 'set-de-table-lin-xeres',
-    name: 'Set de table en lin Xérès',
-    image: '/images/products/set-xeres.webp',
-    alt: 'Set de table en lin écru brodé d’un fin liseré terracotta',
-    amount: 2400,
-    badge: 'last',
-  },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// JSON-LD Organization (AC-HOME-14)
-// ─────────────────────────────────────────────────────────────────────────────
-
 const ORG_JSON_LD = {
   '@context': 'https://schema.org',
   '@type': 'Organization',
@@ -183,6 +119,18 @@ const ORG_JSON_LD = {
 } as const;// ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
+
+const FEATURED_PRODUCTS = findFeaturedProducts().map((p) => ({
+  slug: p.slug,
+  name: p.name,
+  image: p.image,
+  alt: p.alt,
+  amount: p.priceCents,
+  compareAt: p.compareAtCents,
+  badge: p.badge,
+  category: p.category,
+  variants: p.variants.map((v) => ({ id: v.id, price: v.priceCents, compareAt: v.compareAtCents })),
+}));
 
 export default function HomePage() {
   return (
@@ -201,8 +149,8 @@ export default function HomePage() {
           className="relative isolate overflow-hidden bg-ink-50"
         >
           <div className="mx-auto grid max-w-7xl gap-12 px-4 py-16 sm:px-6 sm:py-20 lg:grid-cols-12 lg:gap-16 lg:px-8 lg:py-28">
-            <div className="lg:col-span-6 lg:flex lg:flex-col lg:justify-center">
-              <p className="mb-4 text-xs font-medium uppercase tracking-[0.18em] text-accent-700">
+            <MotionFade className="lg:col-span-6 lg:flex lg:flex-col lg:justify-center" duration={0.7} y={20}>
+              <p className="mb-4 inline-flex items-center gap-2 rounded-full bg-accent-50 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-accent-700 ring-1 ring-accent-200">
                 Nouvelle collection
               </p>
 
@@ -252,9 +200,9 @@ export default function HomePage() {
                   <dd>production responsable</dd>
                 </div>
               </dl>
-            </div>
+            </MotionFade>
 
-            <div className="relative lg:col-span-6">
+            <MotionParallax strength={24} className="relative lg:col-span-6">
               {/* AC-HOME-04 — image WebP/AVIF, alt informatif, LCP */}
               <div className="relative aspect-[4/5] w-full overflow-hidden rounded-3xl bg-ink-100 shadow-xl sm:aspect-[5/4] lg:aspect-[4/5]">
                 <Image
@@ -274,7 +222,7 @@ export default function HomePage() {
               >
                 Livraison offerte dès 80 €
               </Badge>
-            </div>
+            </MotionParallax>
           </div>
         </section>{/* ─────────── COLLECTIONS VEDETTES ─────────── */}
         <section
@@ -369,63 +317,7 @@ export default function HomePage() {
               </Link>
             </header>
 
-            {/* AC-HOME-06 — 6 produits (grille 1 → 2 → 3 → 4 colonnes) */}
-            <ul
-              role="list"
-              className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            >
-              {FEATURED_PRODUCTS.map((product, index) => (
-                <li key={product.slug}>
-                  <Card className="group h-full overflow-hidden border-ink-200 transition-shadow hover:shadow-lg">
-                    <Link
-                      href={`/products/${product.slug}`}
-                      className="flex h-full flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
-                      aria-label={`Voir le produit ${product.name}`}
-                    >
-                      <div className="relative aspect-square w-full overflow-hidden bg-white">
-                        <Image
-                          src={product.image}
-                          alt={product.alt}
-                          fill
-                          sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                          // Lazy sauf 1ère (LCP-friendly pour le bloc)
-                          loading={index === 0 ? 'eager' : 'lazy'}
-                          fetchPriority={index === 0 ? 'high' : 'auto'}
-                          className="object-cover transition-transform duration-500 group-hover:scale-105"
-                        />
-                        {product.badge ? (
-                          <Badge
-                            variant={
-                              product.badge === 'promo'
-                                ? 'accent'
-                                : product.badge === 'new'
-                                  ? 'success'
-                                  : 'warning'
-                            }
-                            className="absolute left-3 top-3 shadow-sm"
-                          >
-                            {product.badge === 'promo'
-                              ? 'Promo'
-                              : product.badge === 'new'
-                                ? 'Nouveauté'
-                                : 'Dernières pièces'}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <CardHeader className="gap-1">
-                        <CardTitle className="text-base font-medium text-ink-900">
-                          {product.name}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="mt-auto pt-0">
-                        <Price amount={product.amount} compareAt={product.compareAt} />
-                        <p className="mt-1 text-xs text-ink-500">TTC</p>
-                      </CardContent>
-                    </Link>
-                  </Card>
-                </li>
-              ))}
-            </ul>
+            {/* AC-HOME-06 — grille featured via ProductCard canonique du DS */}
           </div>
         </section>
       </main>
