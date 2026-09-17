@@ -1,24 +1,24 @@
 'use client';
 
 /**
- * CartDrawer — version réelle (alimentée par le cart store)
+ * CartDrawer — version réelle (alimentée par le cart store) — V2
  *
- * Remplace le placeholder dans `site-header-overlays.tsx`.
- * - Liste les items du store avec qty stepper + remove.
- * - Affiche subtotal + barre "livraison offerte dès X €" qui se remplit.
+ * - Liste les items du store avec qty stepper (animé bounce) + remove.
+ * - Affiche subtotal animé (MotionCountUp) + barre "livraison offerte dès X €"
+ *   qui se remplit avec spring + 🎉 confetti quand le seuil est atteint.
  * - Empty state propre avec illustration SVG inline.
  * - Bouton "Voir le panier" → /panier (M3).
- * - Fermeture : ESC / backdrop / clic X.
+ * - Spring d'ouverture via Framer Motion (backdrop blur + slide-in).
+ * - ESC / backdrop / clic X ferment.
  * - Body scroll-lock quand ouvert.
- * - Spring d'ouverture via Framer Motion.
  */
 
 import * as React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Plus, Minus, X, ShoppingBag, Truck } from 'lucide-react';
-import { buttonVariants, QuantityStepper, cn } from '@ecommerce/ui';
+import { X, ShoppingBag, Truck, Sparkles } from 'lucide-react';
+import { buttonVariants, QuantityStepper, MotionCountUp, cn } from '@ecommerce/ui';
 import {
   useCartItems,
   useCartStore,
@@ -26,6 +26,7 @@ import {
   FREE_SHIPPING_THRESHOLD_CENTS,
   STANDARD_SHIPPING_CENTS,
 } from '../lib/cart-store';
+import { fireConfetti } from '../lib/confetti';
 
 interface CartDrawerProps {
   open: boolean;
@@ -41,7 +42,26 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
   const updateQty = useCartStore((s) => s.updateQty);
   const remove = useCartStore((s) => s.remove);
 
-  // ESC + body scroll-lock
+  const prevSubtotalRef = React.useRef(0);
+  const [shippingUnlockedFlash, setShippingUnlockedFlash] = React.useState(false);
+
+  React.useEffect(() => {
+    const subtotal = computeSubtotalCents(items);
+    const prev = prevSubtotalRef.current;
+    if (
+      subtotal >= FREE_SHIPPING_THRESHOLD_CENTS &&
+      prev < FREE_SHIPPING_THRESHOLD_CENTS &&
+      items.length > 0
+    ) {
+      if (!reduced) {
+        fireConfetti({ count: 36, origin: { x: 75, y: 35 } });
+      }
+      setShippingUnlockedFlash(true);
+      window.setTimeout(() => setShippingUnlockedFlash(false), 1400);
+    }
+    prevSubtotalRef.current = subtotal;
+  }, [items, reduced]);
+
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -59,8 +79,14 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
   const subtotal = computeSubtotalCents(items);
   const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD_CENTS - subtotal);
   const progress = Math.min(100, (subtotal / FREE_SHIPPING_THRESHOLD_CENTS) * 100);
-  const shipping = subtotal === 0 ? 0 : subtotal >= FREE_SHIPPING_THRESHOLD_CENTS ? 0 : STANDARD_SHIPPING_CENTS;
+  const shipping =
+    subtotal === 0
+      ? 0
+      : subtotal >= FREE_SHIPPING_THRESHOLD_CENTS
+        ? 0
+        : STANDARD_SHIPPING_CENTS;
   const total = subtotal + shipping;
+  const totalQty = items.reduce((acc, i) => acc + i.quantity, 0);
 
   return (
     <AnimatePresence>
@@ -72,7 +98,6 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
           aria-label="Panier"
           className="fixed inset-0 z-[60] flex justify-end"
         >
-          {/* Backdrop */}
           <motion.div
             initial={reduced ? { opacity: 1 } : { opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -82,7 +107,7 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
             className="absolute inset-0 bg-ink-900/45 backdrop-blur-sm"
             aria-hidden="true"
           />
-          {/* Drawer */}
+
           <motion.aside
             initial={reduced ? { x: 0 } : { x: '100%' }}
             animate={{ x: 0 }}
@@ -94,9 +119,7 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
               <div>
                 <h2 className="font-display text-xl font-medium text-ink-900">Votre panier</h2>
                 <p className="text-xs text-ink-500">
-                  {items.length === 0
-                    ? 'Aucun article'
-                    : `${items.reduce((acc, i) => acc + i.quantity, 0)} article${items.reduce((acc, i) => acc + i.quantity, 0) > 1 ? 's' : ''}`}
+                  {items.length === 0 ? 'Aucun article' : `${totalQty} article${totalQty > 1 ? 's' : ''}`}
                 </p>
               </div>
               <button
@@ -109,18 +132,41 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
               </button>
             </header>
 
-            {/* Progress bar livraison offerte */}
             {items.length > 0 ? (
-              <div className="border-b border-ink-200 bg-ink-50 px-5 py-3">
+              <motion.div layout className="relative overflow-hidden border-b border-ink-200 bg-gradient-to-r from-ink-50 via-ink-50 to-accent-50/40 px-5 py-3">
                 <div className="flex items-center gap-2 text-xs text-ink-700">
-                  <Truck className="h-4 w-4 text-accent-700" aria-hidden="true" />
+                  <motion.div
+                    animate={
+                      shippingUnlockedFlash
+                        ? { rotate: [0, -12, 12, -6, 0], scale: [1, 1.15, 1] }
+                        : { rotate: 0, scale: 1 }
+                    }
+                    transition={{ duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
+                  >
+                    {remaining === 0 ? (
+                      <Sparkles className="h-4 w-4 text-success-600" aria-hidden="true" />
+                    ) : (
+                      <Truck className="h-4 w-4 text-accent-700" aria-hidden="true" />
+                    )}
+                  </motion.div>
                   {remaining > 0 ? (
                     <p>
-                      Plus que <strong className="font-semibold text-ink-900">{fmtEUR(remaining)}</strong> pour la{' '}
+                      Plus que{' '}
+                      <strong className="font-semibold tabular-nums text-ink-900">
+                        <MotionCountUp value={remaining / 100} prefix="" decimals={2} suffix=" €" duration={0.6} />
+                      </strong>{' '}
+                      pour la{' '}
                       <strong className="font-semibold text-success-700">livraison offerte</strong>
                     </p>
                   ) : (
-                    <p className="text-success-700 font-medium">🎉 Livraison offerte débloquée</p>
+                    <motion.p
+                      initial={{ scale: reduced ? 1 : 0.85, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: 'spring', stiffness: 320, damping: 18 }}
+                      className="font-semibold text-success-700"
+                    >
+                      🎉 Livraison offerte débloquée
+                    </motion.p>
                   )}
                 </div>
                 <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-200">
@@ -128,14 +174,13 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
                     initial={false}
                     animate={{ width: `${progress}%` }}
                     transition={{ type: 'spring', stiffness: 220, damping: 28 }}
-                    className="h-full rounded-full bg-accent-700"
+                    className="h-full rounded-full bg-gradient-to-r from-accent-500 via-accent-700 to-accent-500"
                     aria-hidden="true"
                   />
                 </div>
-              </div>
+              </motion.div>
             ) : null}
 
-            {/* Content */}
             <div className="flex-1 overflow-y-auto px-5 py-4">
               {items.length === 0 ? (
                 <EmptyCart onClose={onClose} />
@@ -149,7 +194,7 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
                         initial={reduced ? { opacity: 0 } : { opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={reduced ? { opacity: 0 } : { opacity: 0, x: 60, scale: 0.96 }}
-                        transition={{ duration: reduced ? 0 : 0.25 }}
+                        transition={{ duration: reduced ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
                         className="flex gap-3 rounded-2xl border border-ink-200 bg-white p-3"
                       >
                         <Link
@@ -199,23 +244,48 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
               )}
             </div>
 
-            {/* Footer */}
             {items.length > 0 ? (
               <footer className="border-t border-ink-200 bg-white p-5">
                 <dl className="space-y-1.5 text-sm">
                   <div className="flex justify-between">
                     <dt className="text-ink-600">Sous-total</dt>
-                    <dd className="font-medium tabular-nums text-ink-900">{fmtEUR(subtotal)}</dd>
+                    <dd className="font-medium tabular-nums text-ink-900">
+                      <MotionCountUp value={subtotal / 100} decimals={2} suffix=" €" duration={0.5} />
+                    </dd>
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-ink-600">Livraison</dt>
                     <dd className="font-medium tabular-nums text-ink-900">
-                      {shipping === 0 ? <span className="text-success-700">Offerte</span> : fmtEUR(shipping)}
+                      <AnimatePresence mode="wait" initial={false}>
+                        {shipping === 0 ? (
+                          <motion.span
+                            key="free"
+                            initial={{ scale: reduced ? 1 : 0.7, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ type: 'spring', stiffness: 320, damping: 18 }}
+                            className="inline-block text-success-700"
+                          >
+                            Offerte
+                          </motion.span>
+                        ) : (
+                          <motion.span
+                            key="paid"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                          >
+                            <MotionCountUp value={shipping / 100} decimals={2} suffix=" €" duration={0.4} />
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
                     </dd>
                   </div>
                   <div className="mt-2 flex justify-between border-t border-ink-200 pt-2 text-base">
                     <dt className="font-semibold text-ink-900">Total</dt>
-                    <dd className="font-semibold tabular-nums text-ink-900">{fmtEUR(total)}</dd>
+                    <dd className="font-semibold tabular-nums text-ink-900">
+                      <MotionCountUp value={total / 100} decimals={2} suffix=" €" duration={0.6} />
+                    </dd>
                   </div>
                 </dl>
                 <p className="mt-2 text-xs text-ink-500">TVA incluse. Frais de port calculés à l'étape suivante.</p>
@@ -243,11 +313,17 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
 }
 
 function EmptyCart({ onClose }: { onClose: () => void }) {
+  const reduced = useReducedMotion();
   return (
     <div className="flex h-full flex-col items-center justify-center text-center">
-      <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-ink-100">
-        <ShoppingBag className="h-9 w-9 text-ink-500" aria-hidden="true" />
-      </div>
+      <motion.div
+        initial={{ scale: reduced ? 1 : 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 18, delay: 0.1 }}
+        className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-accent-50 to-ink-100"
+      >
+        <ShoppingBag className="h-9 w-9 text-accent-700" aria-hidden="true" />
+      </motion.div>
       <p className="font-display text-lg text-ink-900">Votre panier est vide</p>
       <p className="mt-1 max-w-xs text-sm text-ink-600">
         Parcourez notre catalogue pour dénicher des pièces sélectionnées avec soin.

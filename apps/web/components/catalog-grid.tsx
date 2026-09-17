@@ -2,18 +2,27 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ProductCard, MotionStagger, MotionStaggerItem, type ProductCardData } from '@ecommerce/ui';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { Search, X } from 'lucide-react';
+import {
+  ProductCard,
+  MotionStagger,
+  MotionStaggerItem,
+  type ProductCardData,
+} from '@ecommerce/ui';
 import { useAddToCart } from '../lib/use-add-to-cart';
 import { PRODUCTS, CATEGORIES, type Product } from '../lib/products';
 
 /**
- * CatalogGrid — Client Component pour /products et /collections/[slug].
+ * CatalogGrid V2 — Client Component pour /products et /collections/[slug].
  *
- * - Liste tous les produits du catalog.
- * - Filtres : categorie (pre-appliquee si initialCategory est fourni), prix range.
+ * - Filtres : categorie (pre-appliquee si initialCategory), prix range.
  * - Tri : nouveautes (defaut), prix asc/desc, popularite.
  * - Pagination client-side (12 par page).
- * - Vide : empty state avec reset filtres.
+ * - Empty state avec reset filtres.
+ * - Filtres pill avec sliding indicator (layoutId="filter-pill-bg").
+ * - AnimatePresence sur la grille : layout animation fluide quand le
+ *   filtre change (les cartes se réorganisent en spring).
  */
 
 type SortKey = 'newest' | 'price-asc' | 'price-desc' | 'rating';
@@ -34,7 +43,6 @@ const DEFAULT_FILTERS: Filters = {
 };
 
 interface CatalogGridProps {
-  /** Categorie pre-appliquee (pour /collections/[slug]). */
   initialCategory?: string;
 }
 
@@ -79,7 +87,13 @@ function toCardData(p: Product): ProductCardData {
   };
 }
 
+const ALL_FILTERS: ReadonlyArray<{ key: CategoryFilter; label: string }> = [
+  { key: 'all', label: 'Toutes' },
+  ...CATEGORIES.map((c) => ({ key: c, label: c })),
+];
+
 export function CatalogGrid({ initialCategory }: CatalogGridProps = {}): React.ReactElement {
+  const reduced = useReducedMotion();
   const [filters, setFilters] = React.useState<Filters>(() => ({
     ...DEFAULT_FILTERS,
     category: initialCategory ?? 'all',
@@ -107,40 +121,51 @@ export function CatalogGrid({ initialCategory }: CatalogGridProps = {}): React.R
   return (
     <div data-testid="catalog-grid">
       {/* Toolbar */}
-      <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-ink-200 bg-ink-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <motion.div
+        layout
+        className="mb-6 flex flex-col gap-3 rounded-2xl border border-ink-200 bg-ink-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+      >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium uppercase tracking-wide text-ink-500">Categorie</span>
-          <button
-            type="button"
-            onClick={() => updateCategory('all')}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-              filters.category === 'all'
-                ? 'bg-accent-700 text-white'
-                : 'border border-ink-300 bg-white text-ink-700 hover:border-accent-700 hover:text-accent-700'
-            }`}
-            aria-pressed={filters.category === 'all'}
-          >
-            Toutes
-          </button>
-          {CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => updateCategory(c)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                filters.category === c
-                  ? 'bg-accent-700 text-white'
-                  : 'border border-ink-300 bg-white text-ink-700 hover:border-accent-700 hover:text-accent-700'
-              }`}
-              aria-pressed={filters.category === c}
-            >
-              {c}
-            </button>
-          ))}
+          <span className="text-xs font-medium uppercase tracking-wide text-ink-500">
+            Catégorie
+          </span>
+          <div className="relative flex flex-wrap items-center gap-1 rounded-full bg-white p-1 ring-1 ring-ink-200">
+            {ALL_FILTERS.map((f) => {
+              const active = filters.category === f.key;
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => updateCategory(f.key)}
+                  className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    active ? 'text-white' : 'text-ink-700 hover:text-ink-900'
+                  }`}
+                  aria-pressed={active}
+                  data-testid={`filter-${f.key}`}
+                >
+                  {active ? (
+                    <motion.span
+                      layoutId="filter-pill-bg"
+                      className="absolute inset-0 rounded-full bg-accent-700 shadow-sm"
+                      transition={
+                        reduced
+                          ? { duration: 0 }
+                          : { type: 'spring', stiffness: 380, damping: 30 }
+                      }
+                    />
+                  ) : null}
+                  <span className="relative z-10">{f.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <label htmlFor="catalog-sort" className="text-xs font-medium uppercase tracking-wide text-ink-500">
+          <label
+            htmlFor="catalog-sort"
+            className="text-xs font-medium uppercase tracking-wide text-ink-500"
+          >
             Trier
           </label>
           <select
@@ -150,101 +175,140 @@ export function CatalogGrid({ initialCategory }: CatalogGridProps = {}): React.R
               setSort(e.target.value as SortKey);
               setPage(1);
             }}
-            className="h-9 rounded-full border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-accent-600"
+            className="h-9 rounded-full border border-ink-300 bg-white px-3 text-sm text-ink-900 transition-colors focus:border-accent-700 focus:outline-none focus:ring-2 focus:ring-accent-600"
             data-testid="catalog-sort"
           >
-            <option value="newest">Nouveautes</option>
+            <option value="newest">Nouveautés</option>
             <option value="price-asc">Prix croissant</option>
-            <option value="price-desc">Prix decroissant</option>
-            <option value="rating">Popularite</option>
+            <option value="price-desc">Prix décroissant</option>
+            <option value="rating">Popularité</option>
           </select>
         </div>
-      </div>
+      </motion.div>
 
       {/* Compteur */}
-      <p className="mb-4 text-sm text-ink-600" data-testid="catalog-count">
+      <motion.p
+        layout
+        className="mb-4 text-sm text-ink-600"
+        data-testid="catalog-count"
+        key={`count-${filters.category}-${sort}-${currentPage}`}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+      >
         {sorted.length === 0
-          ? 'Aucun produit ne correspond a vos criteres.'
-          : `${sorted.length} produit${sorted.length > 1 ? 's' : ''} ${filters.category === 'all' ? '' : `en ${filters.category}`}`}
-      </p>
+          ? 'Aucun produit ne correspond à vos critères.'
+          : `${sorted.length} produit${sorted.length > 1 ? 's' : ''} ${
+              filters.category === 'all' ? '' : `en ${filters.category}`
+            }`}
+      </motion.p>
 
-      {/* Grille */}
-      {sorted.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 p-12 text-center">
-          <p className="font-display text-xl text-ink-900">Aucun resultat</p>
-          <p className="mt-2 text-sm text-ink-600">
-            Essayez d&apos;elargir vos filtres pour voir plus de produits.
-          </p>
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="mt-4 text-sm font-medium text-accent-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
+      {/* Grille avec AnimatePresence + layout */}
+      <AnimatePresence mode="wait" initial={false}>
+        {sorted.length === 0 ? (
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0, scale: 0.96, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            className="rounded-2xl border border-dashed border-ink-300 bg-ink-50 p-12 text-center"
           >
-            Reinitialiser les filtres
-          </button>
-        </div>
-      ) : (
-        <MotionStagger
-          
-          role="list"
-          className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-          data-testid="catalog-list"
-        >
-          {pageItems.map((product) => {
-            const data = toCardData(product);
-            return (
-              <MotionStaggerItem key={product.slug}>
-                <ProductCard
-                  product={data}
-                  onQuickAdd={() =>
-                    add({
-                      variantId: product.variants[0]?.id ?? product.slug,
-                      productSlug: product.slug,
-                      name: product.name,
-                      image: product.image,
-                      amount: product.priceCents,
-                      compareAt: product.compareAtCents,
-                      options: product.variants[0]?.options,
-                      maxQuantity: product.variants[0]?.stock ?? 10,
-                    })
-                  }
-                />
-              </MotionStaggerItem>
-            );
-          })}
-        </MotionStagger>
-      )}
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-ink-200">
+              <Search className="h-6 w-6 text-ink-500" aria-hidden="true" />
+            </div>
+            <p className="font-display text-xl text-ink-900">Aucun résultat</p>
+            <p className="mt-2 text-sm text-ink-600">
+              Essayez d&apos;élargir vos filtres pour voir plus de produits.
+            </p>
+            <motion.button
+              type="button"
+              onClick={resetFilters}
+              whileHover={reduced ? undefined : { scale: 1.02 }}
+              whileTap={reduced ? undefined : { scale: 0.98 }}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-accent-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-accent-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+              Réinitialiser les filtres
+            </motion.button>
+          </motion.div>
+        ) : (
+          <motion.div
+            key={`grid-${filters.category}-${sort}-${currentPage}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            <MotionStagger
+              role="list"
+              className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              data-testid="catalog-list"
+              stagger={0.05}
+            >
+              {pageItems.map((product) => {
+                const data = toCardData(product);
+                return (
+                  <MotionStaggerItem key={product.slug} layout>
+                    <ProductCard
+                      product={data}
+                      onQuickAdd={() =>
+                        add({
+                          variantId: product.variants[0]?.id ?? product.slug,
+                          productSlug: product.slug,
+                          name: product.name,
+                          image: product.image,
+                          amount: product.priceCents,
+                          compareAt: product.compareAtCents,
+                          options: product.variants[0]?.options,
+                          maxQuantity: product.variants[0]?.stock ?? 10,
+                        })
+                      }
+                    />
+                  </MotionStaggerItem>
+                );
+              })}
+            </MotionStagger>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Pagination */}
       {totalPages > 1 ? (
-        <nav
+        <motion.nav
+          layout
           aria-label="Pagination du catalogue"
           className="mt-10 flex items-center justify-center gap-2"
           data-testid="catalog-pagination"
         >
-          <button
+          <motion.button
             type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className="rounded-full border border-ink-300 bg-white px-3 py-1 text-sm font-medium text-ink-700 transition-colors hover:border-accent-700 hover:text-accent-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
+            whileHover={reduced ? undefined : { scale: 1.04 }}
+            whileTap={reduced ? undefined : { scale: 0.96 }}
+            className="rounded-full border border-ink-300 bg-white px-4 py-1.5 text-sm font-medium text-ink-700 transition-colors hover:border-accent-700 hover:text-accent-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
           >
-            Precedent
-          </button>
-          <span className="px-3 text-sm text-ink-600">
-            Page {currentPage} / {totalPages}
+            Précédent
+          </motion.button>
+          <span className="px-3 text-sm tabular-nums text-ink-600">
+            Page <strong className="text-ink-900">{currentPage}</strong> /{' '}
+            <strong className="text-ink-900">{totalPages}</strong>
           </span>
-          <button
+          <motion.button
             type="button"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
-            className="rounded-full border border-ink-300 bg-white px-3 py-1 text-sm font-medium text-ink-700 transition-colors hover:border-accent-700 hover:text-accent-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
+            whileHover={reduced ? undefined : { scale: 1.04 }}
+            whileTap={reduced ? undefined : { scale: 0.96 }}
+            className="rounded-full border border-ink-300 bg-white px-4 py-1.5 text-sm font-medium text-ink-700 transition-colors hover:border-accent-700 hover:text-accent-700 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-600 focus-visible:ring-offset-2"
           >
             Suivant
-          </button>
-        </nav>
+          </motion.button>
+        </motion.nav>
       ) : null}
 
-      {/* Lien vers le footer statique */}
+      {/* Footer link */}
       <div className="mt-12 text-center text-xs text-ink-500">
         <Link href="/collections" className="underline-offset-4 hover:underline">
           Voir aussi les collections vedettes
