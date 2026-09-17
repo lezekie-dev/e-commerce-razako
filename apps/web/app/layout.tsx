@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { SiteHeader } from '../components/site-header';
+import { PMReviewOverlay } from '../components/pm-review-overlay';
 import { ToastHost } from '../components/toast-host';
 import { CartHydrator } from '../components/cart-hydrator';
 
@@ -73,6 +74,9 @@ export default function RootLayout({
         <ToastHost><CartHydrator /><SiteHeader />
 
         {children}</ToastHost>
+
+        {/* PM Review overlay */}
+        <PMReviewOverlay />
       </body>
     </html>
   );
